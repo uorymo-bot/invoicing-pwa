@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>نظام الفواتير والمبيعات - PWA</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Font: Cairo -->
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Cairo', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              500: '#0284c7',
+              600: '#0369a1',
+              700: '#075985',
+              800: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Cairo', sans-serif;
+      background-color: #f8fafc;
+      color: #1e293b;
+    }
+
+    /* Print Formatting Rules for A4 Invoices */
+    @media print {
+      body {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        font-size: 12pt;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .print-only {
+        display: block !important;
+      }
+      .print-container {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+      }
+      table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      th, td {
+        border: 1px solid #666 !important;
+        padding: 6px 8px !important;
+      }
+      .page-break {
+        page-break-after: always;
+      }
+    }
+
+    .print-only {
+      display: none;
+    }
+
+    /* Hide Spinners on Input Numbers */
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type=number] {
+      -moz-appearance: textfield;
+    }
+
+    /* Custom Input Ghost Placeholder Styling */
+    .discount-input::placeholder {
+      color: #cbd5e1;
+      opacity: 0.8;
+      font-weight: 300;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Application Header & Status Bar -->
+  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-50 no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center space-x-3 space-x-reverse">
+        <div class="p-2 bg-brand-600 rounded-lg text-white shadow">
+          <i class="fa-solid fa-file-invoice-dollar text-2xl"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight">نظام الفواتير والمبيعات</h1>
+          <p class="text-xs text-slate-400">تطبيق ويب متقدم (PWA) يعمل أونلاين وأوفلاين</p>
+        </div>
+      </div>
+
+      <!-- Network Status & Actions -->
+      <div class="flex items-center space-x-3 space-x-reverse flex-wrap gap-2">
+        
+        <!-- Network Badge -->
+        <div id="networkStatusBadge" class="flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block ml-2 animate-pulse"></span>
+          <span id="networkStatusText">متصل أونلاين</span>
+          <span id="queueCountBadge" class="hidden mr-2 bg-amber-500 text-slate-950 px-1.5 py-0.5 rounded-full text-[10px] font-bold">0 أوفلاين</span>
+        </div>
+
+        <!-- Sync Button -->
+        <button id="btnManualSync" onclick="app.triggerSync()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center">
+          <i class="fa-solid fa-rotate ml-1.5 text-brand-500"></i>
+          مزامنة السحاب
+        </button>
+
+        <!-- Install PWA Button -->
+        <button id="btnInstallPWA" onclick="app.installPWA()" class="hidden px-3 py-1.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-lg shadow transition flex items-center">
+          <i class="fa-solid fa-download ml-1.5"></i>
+          تثبيت التطبيق
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="flex-grow max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+    <div id="printableArea" class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 print-container">
+      
+      <!-- Notification Bar -->
+      <div id="notificationBox" class="hidden no-print mb-6 p-4 rounded-xl text-sm font-medium transition-all"></div>
+
+      <!-- Document Meta Section -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 border-b border-slate-100 pb-6">
+        
+        <!-- Column 1: Type & Number -->
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">نوع المستند</label>
+            <select id="documentType" onchange="app.onDocumentTypeChange()" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl focus:ring-brand-500 focus:border-brand-500 p-2.5 font-semibold">
+              <option value="invoice">فاتورة مبيعات</option>
+              <option value="مرتجع">فاتورة مرتجع</option>
+              <option value="عرض سعر">عرض سعر</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">رقم الفاتورة / المستند</label>
+            <div class="relative">
+              <input type="text" id="invoiceNumber" readonly class="w-full bg-slate-100 border border-slate-200 text-slate-700 text-sm rounded-xl p-2.5 font-mono font-bold" value="---">
+              <span class="absolute left-3 top-2.5 text-xs text-slate-400 font-sans">تلقائي</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 2: Customer Details -->
+        <div class="space-y-4">
+          <div class="relative">
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">اسم العميل <span class="text-rose-500">*</span></label>
+            <input type="text" id="customerName" placeholder="ابحث أو ادخل اسم العميل..." oninput="app.searchCustomers(this.value)" autocomplete="off" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl focus:ring-brand-500 focus:border-brand-500 p-2.5">
+            <!-- Customer Autocomplete Dropdown -->
+            <div id="customerDropdown" class="hidden absolute right-0 left-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-48 overflow-y-auto no-print"></div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">رقم الهاتف / المحمول</label>
+            <input type="text" id="customerPhone" placeholder="01xxxxxxxx" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl p-2.5 font-mono">
+          </div>
+        </div>
+
+        <!-- Column 3: Salesperson & Date -->
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">مسؤول المبيعات (المندوب) <span class="text-rose-500">*</span></label>
+            <select id="salesPerson" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl focus:ring-brand-500 focus:border-brand-500 p-2.5 font-semibold">
+              <option value="">-- اختر المسؤول --</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">تاريخ الإصدار</label>
+            <input type="date" id="invoiceDate" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl p-2.5">
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Pressed Products Fast Pricing Calculator Widget (Collapsible) -->
+      <div class="no-print mb-6 bg-brand-50/60 border border-brand-100 rounded-2xl p-4">
+        <button type="button" onclick="app.togglePressedCalculator()" class="w-full flex items-center justify-between text-brand-800 font-bold text-sm">
+          <span class="flex items-center">
+            <i class="fa-solid fa-calculator ml-2 text-brand-600"></i>
+            حاسبة تسعير المنتجات المكبوسة (الكونتر / MDF / الطبقات)
+          </span>
+          <i id="pressedCalcChevron" class="fa-solid fa-chevron-down text-xs transition-transform"></i>
+        </button>
+
+        <div id="pressedCalcBody" class="hidden mt-4 pt-4 border-t border-brand-200/50 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">نوع اللوح الأساسي</label>
+            <select id="calcBoardType" onchange="app.calculatePressedProductPrice()" class="w-full border-slate-300 rounded-lg p-2 text-xs">
+              <option value="1200">كونتر محلي (1,200 ج.م)</option>
+              <option value="1600">MDF إسباني 18 مم (1,600 ج.م)</option>
+              <option value="2100">كونتر جودوود ممتاز (2,100 ج.م)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">سعر الوجوه / القشرة</label>
+            <select id="calcSheetPrice" onchange="app.calculatePressedProductPrice()" class="w-full border-slate-300 rounded-lg p-2 text-xs">
+              <option value="250">قشرة أرو إسباني (250 ج.م/وجه)</option>
+              <option value="350">قشرة جوز طبيعي (350 ج.م/وجه)</option>
+              <option value="180">قشرة ميلامين أبيض (180 ج.م/وجه)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">الكبس واللصق</label>
+            <select id="calcPressSide" onchange="app.calculatePressedProductPrice()" class="w-full border-slate-300 rounded-lg p-2 text-xs">
+              <option value="single">وجه واحد (كبس + قشرة واحدة)</option>
+              <option value="double" selected>وجهين (كبس + 2 قشرة)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">تكلفة تكبس المصنع</label>
+            <input type="number" id="calcPressCost" value="150" oninput="app.calculatePressedProductPrice()" class="w-full border-slate-300 rounded-lg p-2 text-xs font-mono">
+          </div>
+
+          <div class="flex flex-col justify-end">
+            <button type="button" onclick="app.addPressedProductToInvoice()" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-bold py-2 px-3 rounded-lg text-xs shadow transition flex items-center justify-center">
+              <i class="fa-solid fa-plus ml-1"></i>
+              إضافة للصنف (<span id="calcResultPrice">0</span> ج.م)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Line Items Table -->
+      <div class="overflow-x-auto mb-6">
+        <table class="w-full text-right text-sm">
+          <thead>
+            <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <th class="p-3 w-12 text-center">م</th>
+              <th class="p-3">اسم المنتج / الصنف</th>
+              <th class="p-3 w-28">النوع / البيان</th>
+              <th class="p-3 w-24 text-center">الكمية</th>
+              <th class="p-3 w-28 text-center">سعر الوحدة</th>
+              <th class="p-3 w-24 text-center">خصم %</th>
+              <th class="p-3 w-28 text-center">الإجمالي</th>
+              <th class="p-3 w-32">ملاحظات</th>
+              <th class="p-3 w-12 text-center no-print">حذف</th>
+            </tr>
+          </thead>
+          <tbody id="itemsTableBody" class="divide-y divide-slate-200">
+            <!-- Row Items populated dynamically -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Table Action Control -->
+      <div class="mb-8 no-print flex items-center justify-between">
+        <button type="button" onclick="app.addItemRow()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition flex items-center">
+          <i class="fa-solid fa-plus ml-1.5 text-brand-600"></i>
+          إضافة بند جديد
+        </button>
+        <span class="text-xs text-slate-400">* سيتم إخفاء المنتجات ذات المخزون الصفري في الفاتورة فقط تلقائياً.</span>
+      </div>
+
+      <!-- Totals & Summary Panel -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 border-t border-slate-200 pt-6">
+        
+        <!-- Left: Notes & Signatures -->
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-1.5">ملاحظات الفاتورة العامة</label>
+            <textarea id="invoiceGlobalNotes" rows="3" placeholder="أدخل أي شروط أو ملاحظات خاصة بالتسليم والاستلام..." class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-xl p-2.5"></textarea>
+          </div>
+
+          <div class="pt-6 grid grid-cols-2 gap-4 text-center text-xs font-bold text-slate-600">
+            <div class="border-t border-slate-300 pt-3">توقيع المستلم</div>
+            <div class="border-t border-slate-300 pt-3">توقيع مسؤول المبيعات</div>
+          </div>
+        </div>
+
+        <!-- Right: Calculations breakdown -->
+        <div class="bg-slate-50 rounded-2xl p-5 border border-slate-200 space-y-3">
+          <div class="flex justify-between text-slate-600 text-sm">
+            <span>الإجمالي قبل الخصم:</span>
+            <span id="summarySubtotal" class="font-mono font-bold">0.00 ج.م</span>
+          </div>
+
+          <div class="flex justify-between items-center text-slate-600 text-sm">
+            <span>خصم إضافي / خاص:</span>
+            <div class="flex items-center space-x-2 space-x-reverse w-32">
+              <input type="number" id="globalDiscountInput" placeholder="0" min="0" oninput="app.calculateTotals()" class="discount-input w-full bg-white border border-slate-300 rounded-lg text-left p-1 text-xs font-mono font-bold">
+              <span class="text-xs font-bold">ج.م</span>
+            </div>
+          </div>
+
+          <div class="flex justify-between text-slate-600 text-sm">
+            <span>إجمالي قيم الخصومات:</span>
+            <span id="summaryTotalDiscount" class="font-mono font-bold text-rose-600">0.00 ج.م</span>
+          </div>
+
+          <div class="border-t border-slate-200 my-2"></div>
+
+          <div class="flex justify-between text-slate-900 text-lg font-black">
+            <span>صافي إجمالي الفاتورة:</span>
+            <span id="summaryNetTotal" class="font-mono text-brand-700">0.00 ج.م</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Floating Action Toolbar (Bottom Sticky) -->
+    <div class="no-print mt-6 bg-white border border-slate-200 rounded-2xl shadow-lg p-4 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3 space-x-reverse">
+        <button type="button" onclick="app.submitInvoice()" class="px-6 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold text-sm rounded-xl shadow transition flex items-center">
+          <i class="fa-solid fa-check-double ml-2"></i>
+          إصدار وحفظ الفاتورة
+        </button>
+
+        <button type="button" onclick="window.print()" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl shadow transition flex items-center">
+          <i class="fa-solid fa-print ml-2"></i>
+          طباعة / PDF
+        </button>
+      </div>
+
+      <button type="button" onclick="app.resetForm()" class="px-4 py-2.5 text-rose-600 hover:bg-rose-50 font-bold text-sm rounded-xl transition">
+        إلغاء وتفريغ الخانات
+      </button>
+    </div>
+  </main>
+
+  <!-- PWA Logic, Service Worker Registration & App Execution -->
+  <script>
+    /**
+     * Inline Service Worker Script Generation (Blob URL)
+     * Provides Offline First Static Cache & Strategy Fallback
+     */
+    const swCode = `
+      const CACHE_NAME = 'invoicing-pwa-v1';
+      const ASSETS = [
+        './',
+        'https://cdn.tailwindcss.com',
+        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+        'https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap'
+      ];
+
+      self.addEventListener('install', (e) => {
+        e.waitUntil(
+          caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+        );
+        self.skipWaiting();
+      });
+
+      self.addEventListener('activate', (e) => {
+        e.waitUntil(
+          caches.keys().then((keys) => {
+            return Promise.all(
+              keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+            );
+          })
+        );
+        self.clients.claim();
+      });
+
+      self.addEventListener('fetch', (e) => {
+        e.respondWith(
+          caches.match(e.request).then((cachedResponse) => {
+            if (cachedResponse) return cachedResponse;
+            return fetch(e.request).then((response) => {
+              if (!response || response.status !== 200 || response.type !== 'basic') {
+                return response;
+              }
+              const responseToCache = response.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(e.request, responseToCache);
+              });
+              return response;
+            }).catch(() => {
+              // Offline fallback
+            });
+          })
+        );
+      });
+    `;
+
+    /**
+     * Inline Web App Manifest Injection (PWA Installability)
+     */
+    const manifestObject = {
+      name: "نظام الفواتير والمبيعات الأوفلاين",
+      short_name: "الفواتير PWA",
+      description: "نظام إصدار الفواتير والمبيعات والأرشفة يعمل بدون إنترنت",
+      start_url: "./",
+      display: "standalone",
+      background_color: "#f8fafc",
+      theme_color: "#0284c7",
+      icons: [
+        {
+          src: "https://cdn-icons-png.flaticon.com/512/3135/3135706.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any maskable"
+        }
+      ]
+    };
+
+    const manifestBlob = new Blob([JSON.stringify(manifestObject)], { type: 'application/json' });
+    const manifestURL = URL.createObjectURL(manifestBlob);
+    const manifestLink = document.createElement('link');
+    manifestLink.rel = 'manifest';
+    manifestLink.href = manifestURL;
+    document.head.appendChild(manifestLink);
+
+    /**
+     * Main Core Application Controller (IndexedDB + PWA + UI logic)
+     */
+    class InvoicingPWA {
+      constructor() {
+        this.db = null;
+        this.deferredPrompt = null;
+        this.mockProducts = [
+          { id: 1, name: 'كونتر ساده 2 وجه 8621', type: 'لوح', price: 3200, stock: 18, isPressed: true },
+          { id: 2, name: 'شريط + لصق', type: 'متر', price: 18, stock: 202, isPressed: false },
+          { id: 3, name: 'تقطيع اكريليك صغير', type: 'خدمة', price: 75, stock: 18, isPressed: false },
+          { id: 4, name: 'ام دي اف 5م وجه 8621', type: 'لوح', price: 1045, stock: 0, isPressed: true }, // Zero stock pressed product
+          { id: 5, name: 'كونتر حور طبيعي 18مم', type: 'لوح', price: 2800, stock: 0, isPressed: true }, // Zero stock pressed product
+          { id: 6, name: 'مفصلة مطبخ هيدروليك', type: 'قطعة', price: 45, stock: 150, isPressed: false }
+        ];
+        this.mockCustomers = [
+          { id: 1, name: 'ايمن كمال', phone: '01153369244' },
+          { id: 2, name: 'شركة الأمل للمقاولات', phone: '01002938481' },
+          { id: 3, name: 'مؤسسة السلام للأثاث', phone: '01223948571' }
+        ];
+        this.mockSalesPersons = ['هاجر', 'محمد أحمد', 'محمود علي', 'سارة خالد'];
+      }
+
+      async init() {
+        await this.initIndexedDB();
+        this.registerServiceWorker();
+        this.setupEventListeners();
+        this.loadInitialDropdowns();
+        this.resetForm();
+        this.updateNetworkStatus();
+      }
+
+      /* IndexedDB Storage Engine */
+      initIndexedDB() {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open('InvoicesDB', 1);
+          request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('invoices')) {
+              db.createObjectStore('invoices', { keyPath: 'id', autoIncrement: true });
+            }
+            if (!db.objectStoreNames.contains('offlineQueue')) {
+              db.createObjectStore('offlineQueue', { keyPath: 'id', autoIncrement: true });
+            }
+          };
+          request.onsuccess = (e) => {
+            this.db = e.target.result;
+            this.checkOfflineQueueCount();
+            resolve();
+          };
+          request.onerror = (e) => reject(e);
+        });
+      }
+
+      /* Register Service Worker */
+      registerServiceWorker() {
+        if ('serviceWorker' in navigator) {
+          const blob = new Blob([swCode], { type: 'text/javascript' });
+          const swUrl = URL.createObjectURL(blob);
+          navigator.serviceWorker.register(swUrl)
+            .then(() => console.log('PWA Service Worker Registered Successfully'))
+            .catch(err => console.error('Service Worker Error:', err));
+        }
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+          e.preventDefault();
+          this.deferredPrompt = e;
+          document.getElementById('btnInstallPWA').classList.remove('hidden');
+        });
+      }
+
+      installPWA() {
+        if (this.deferredPrompt) {
+          this.deferredPrompt.prompt();
+          this.deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+              document.getElementById('btnInstallPWA').classList.add('hidden');
+            }
+            this.deferredPrompt = null;
+          });
+        }
+      }
+
+      /* Network listeners & Auto Sync Queue */
+      setupEventListeners() {
+        window.addEventListener('online', () => this.updateNetworkStatus());
+        window.addEventListener('offline', () => this.updateNetworkStatus());
+      }
+
+      updateNetworkStatus() {
+        const badge = document.getElementById('networkStatusBadge');
+        const text = document.getElementById('networkStatusText');
+        const isOnline = navigator.onLine;
+
+        if (isOnline) {
+          badge.className = "flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+          text.textContent = "متصل أونلاين";
+          this.triggerSync();
+        } else {
+          badge.className = "flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20";
+          text.textContent = "غير متصل (أوفلاين)";
+        }
+      }
+
+      /* Zero Stock Logic Requirement: Hide zero stock ONLY in Invoice, show in Return & Quotation */
+      shouldHideZeroStockPressedProduct(product) {
+        if (!product) return false;
+        const documentType = document.getElementById('documentType').value;
+
+        // Display in Quotation (عرض سعر) and Return (مرتجع)
+        if (documentType !== 'invoice') return false;
+
+        // Hide from sales invoice if stock is 0 or less
+        const stock = Number(product.stock);
+        return Number.isFinite(stock) && stock <= 0;
+      }
+
+      /* Load Salespersons and Customer Data */
+      loadInitialDropdowns() {
+        const salesPersonSelect = document.getElementById('salesPerson');
+        salesPersonSelect.innerHTML = '<option value="">-- اختر المسؤول --</option>';
+        this.mockSalesPersons.forEach(person => {
+          const opt = document.createElement('option');
+          opt.value = person;
+          opt.textContent = person;
+          salesPersonSelect.appendChild(opt);
+        });
+      }
+
+      onDocumentTypeChange() {
+        // Re-evaluate items when switching between Invoice, Return, or Quote
+        this.calculateTotals();
+      }
+
+      /* Customer Autocomplete Search */
+      searchCustomers(query) {
+        const dropdown = document.getElementById('customerDropdown');
+        if (!query.trim()) {
+          dropdown.classList.add('hidden');
+          return;
+        }
+
+        const filtered = this.mockCustomers.filter(c => c.name.includes(query) || c.phone.includes(query));
+        if (filtered.length === 0) {
+          dropdown.classList.add('hidden');
+          return;
+        }
+
+        dropdown.innerHTML = filtered.map(c => `
+          <div onclick="app.selectCustomer('${c.name}', '${c.phone}')" class="p-2.5 hover:bg-slate-50 cursor-pointer text-xs border-b border-slate-100 flex justify-between">
+            <span class="font-bold text-slate-800">${c.name}</span>
+            <span class="font-mono text-slate-400">${c.phone}</span>
+          </div>
+        `).join('');
+
+        dropdown.classList.remove('hidden');
+      }
+
+      selectCustomer(name, phone) {
+        document.getElementById('customerName').value = name;
+        document.getElementById('customerPhone').value = phone;
+        document.getElementById('customerDropdown').classList.add('hidden');
+      }
+
+      /* Reset Form State */
+      resetForm() {
+        document.getElementById('invoiceNumber').value = 'INV-' + Math.floor(100000 + Math.random() * 900000);
+        document.getElementById('invoiceDate').value = new Date().toISOString().split('T')[0];
+        document.getElementById('customerName').value = '';
+        document.getElementById('customerPhone').value = '';
+        document.getElementById('salesPerson').value = '';
+        document.getElementById('globalDiscountInput').value = '';
+        document.getElementById('invoiceGlobalNotes').value = '';
+        document.getElementById('itemsTableBody').innerHTML = '';
+        
+        // Add 3 default initial rows
+        this.addItemRow();
+        this.addItemRow();
+        this.addItemRow();
+        this.calculateTotals();
+      }
+
+      /* Add Dynamic Line Item Row */
+      addItemRow(productData = null) {
+        const tbody = document.getElementById('itemsTableBody');
+        const rowIndex = tbody.children.length + 1;
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50/50 transition";
+        tr.innerHTML = `
+          <td class="p-2 text-center font-mono font-bold text-slate-400 text-xs index-cell">${rowIndex}</td>
+          
+          <!-- Product Input Search -->
+          <td class="p-2 relative">
+            <input type="text" class="product-name w-full border border-slate-200 rounded-lg p-2 text-xs font-semibold focus:border-brand-500" placeholder="ابحث عن صنف..." value="${productData ? productData.name : ''}" oninput="app.searchProducts(this)">
+            <div class="product-dropdown hidden absolute right-0 left-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-40 overflow-y-auto no-print"></div>
+          </td>
+
+          <!-- Product Type -->
+          <td class="p-2">
+            <input type="text" class="product-type w-full border border-slate-200 rounded-lg p-2 text-xs" placeholder="لوح/متر" value="${productData ? productData.type : ''}">
+          </td>
+
+          <!-- Quantity -->
+          <td class="p-2">
+            <input type="number" min="1" class="item-qty w-full border border-slate-200 rounded-lg p-2 text-xs font-mono text-center font-bold" value="${productData ? (productData.quantity || 1) : 1}" oninput="app.calculateTotals()">
+          </td>
+
+          <!-- Price -->
+          <td class="p-2">
+            <input type="number" min="0" step="0.01" class="item-price w-full border border-slate-200 rounded-lg p-2 text-xs font-mono text-center font-bold" placeholder="0" value="${productData ? productData.price : ''}" oninput="app.calculateTotals()">
+          </td>
+
+          <!-- Discount % (Ghost zero requirement) -->
+          <td class="p-2">
+            <input type="number" min="0" max="100" step="0.01" class="item-discount discount-input w-full border border-slate-200 rounded-lg p-2 text-xs font-mono text-center font-bold" placeholder="0%" value="${productData && productData.discountPercent > 0 ? productData.discountPercent : ''}" oninput="app.calculateTotals()">
+          </td>
+
+          <!-- Net Subtotal -->
+          <td class="p-2 text-center font-mono font-bold text-slate-800 text-xs item-subtotal">0.00</td>
+
+          <!-- Line Notes (e.g. بيع / حجز) -->
+          <td class="p-2">
+            <input type="text" class="item-notes w-full border border-slate-200 rounded-lg p-2 text-xs" placeholder="بيع / حجز">
+          </td>
+
+          <!-- Delete Row -->
+          <td class="p-2 text-center no-print">
+            <button type="button" onclick="app.removeItemRow(this)" class="text-rose-500 hover:text-rose-700 p-1">
+              <i class="fa-solid fa-trash-can text-sm"></i>
+            </button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+        this.reindexRows();
+        if (productData) this.calculateTotals();
+      }
+
+      removeItemRow(btn) {
+        const row = btn.closest('tr');
+        row.remove();
+        this.reindexRows();
+        this.calculateTotals();
+      }
+
+      reindexRows() {
+        const rows = document.querySelectorAll('#itemsTableBody tr');
+        rows.forEach((row, index) => {
+          row.querySelector('.index-cell').textContent = index + 1;
+        });
+      }
+
+      /* Search Products with Stock Filter */
+      searchProducts(input) {
+        const query = input.value.trim();
+        const dropdown = input.nextElementSibling;
+
+        if (!query) {
+          dropdown.classList.add('hidden');
+          return;
+        }
+
+        const filtered = this.mockProducts.filter(p => {
+          const matches = p.name.includes(query);
+          const isHidden = this.shouldHideZeroStockPressedProduct(p);
+          return matches && !isHidden;
+        });
+
+        if (filtered.length === 0) {
+          dropdown.classList.add('hidden');
+          return;
+        }
+
+        dropdown.innerHTML = filtered.map(p => `
+          <div onclick="app.selectProduct(this, ${p.id})" class="p-2 hover:bg-slate-50 cursor-pointer text-xs border-b border-slate-100 flex justify-between items-center">
+            <div>
+              <div class="font-bold text-slate-800">${p.name}</div>
+              <div class="text-[10px] text-slate-400">المخزون: ${p.stock} | ${p.type}</div>
+            </div>
+            <span class="font-mono font-bold text-brand-600">${p.price} ج.م</span>
+          </div>
+        `).join('');
+
+        dropdown.classList.remove('hidden');
+      }
+
+      selectProduct(element, productId) {
+        const product = this.mockProducts.find(p => p.id === productId);
+        if (!product) return;
+
+        const row = element.closest('tr');
+        row.querySelector('.product-name').value = product.name;
+        row.querySelector('.product-type').value = product.type;
+        row.querySelector('.item-price').value = product.price;
+
+        element.closest('.product-dropdown').classList.add('hidden');
+        this.calculateTotals();
+      }
+
+      /* Calculation Engine */
+      calculateTotals() {
+        let grossTotal = 0;
+        let totalDiscounts = 0;
+
+        const rows = document.querySelectorAll('#itemsTableBody tr');
+        rows.forEach(row => {
+          const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+          const price = parseFloat(row.querySelector('.item-price').value) || 0;
+          const discountPercent = parseFloat(row.querySelector('.item-discount').value) || 0;
+
+          const itemGross = qty * price;
+          const discountVal = (itemGross * Math.min(Math.max(discountPercent, 0), 100)) / 100;
+          const itemNet = itemGross - discountVal;
+
+          grossTotal += itemGross;
+          totalDiscounts += discountVal;
+
+          row.querySelector('.item-subtotal').textContent = itemNet.toFixed(2);
+        });
+
+        const globalDiscount = parseFloat(document.getElementById('globalDiscountInput').value) || 0;
+        const finalDiscountSum = totalDiscounts + globalDiscount;
+        const netTotal = Math.max(0, grossTotal - finalDiscountSum);
+
+        document.getElementById('summarySubtotal').textContent = grossTotal.toFixed(2) + ' ج.م';
+        document.getElementById('summaryTotalDiscount').textContent = finalDiscountSum.toFixed(2) + ' ج.م';
+        document.getElementById('summaryNetTotal').textContent = netTotal.toFixed(2) + ' ج.م';
+      }
+
+      /* Pressed Products Fast Calculator Widget */
+      togglePressedCalculator() {
+        const body = document.getElementById('pressedCalcBody');
+        const chevron = document.getElementById('pressedCalcChevron');
+        body.classList.toggle('hidden');
+        chevron.classList.toggle('rotate-180');
+        this.calculatePressedProductPrice();
+      }
+
+      calculatePressedProductPrice() {
+        const board = parseFloat(document.getElementById('calcBoardType').value) || 0;
+        const sheet = parseFloat(document.getElementById('calcSheetPrice').value) || 0;
+        const side = document.getElementById('calcPressSide').value;
+        const pressCost = parseFloat(document.getElementById('calcPressCost').value) || 0;
+
+        const sheetMultiplier = side === 'double' ? 2 : 1;
+        const totalPrice = board + (sheet * sheetMultiplier) + pressCost;
+
+        document.getElementById('calcResultPrice').textContent = totalPrice.toLocaleString();
+        return totalPrice;
+      }
+
+      addPressedProductToInvoice() {
+        const price = this.calculatePressedProductPrice();
+        const boardSelect = document.getElementById('calcBoardType');
+        const boardName = boardSelect.options[boardSelect.selectedIndex].text.split('(')[0].trim();
+
+        this.addItemRow({
+          name: `مكبوس: ${boardName}`,
+          type: 'لوح',
+          quantity: 1,
+          price: price,
+          discountPercent: 0
+        });
+      }
+
+      /* Validation Rule Implementation: Mandatory Salesperson and Customer */
+      submitInvoice() {
+        const customerName = document.getElementById('customerName').value.trim();
+        const salesPerson = document.getElementById('salesPerson').value.trim();
+
+        if (!customerName) {
+          this.showNotification('من فضلك ادخل اسم العميل أولاً قبل إصدار الفاتورة.', 'error');
+          return;
+        }
+
+        if (!salesPerson) {
+          this.showNotification('من فضلك اختر مسؤول المبيعات (المندوب) أولاً.', 'error');
+          return;
+        }
+
+        const items = [];
+        document.querySelectorAll('#itemsTableBody tr').forEach(row => {
+          const product = row.querySelector('.product-name').value.trim();
+          const quantity = parseFloat(row.querySelector('.item-qty').value) || 0;
+          const price = parseFloat(row.querySelector('.item-price').value) || 0;
+          const discountPercent = parseFloat(row.querySelector('.item-discount').value) || 0;
+          const notes = row.querySelector('.item-notes').value.trim();
+
+          if (product && quantity > 0) {
+            items.push({ product, quantity, price, discountPercent, notes });
+          }
+        });
+
+        if (items.length === 0) {
+          this.showNotification('من فضلك أضف صنفاً واحداً على الأقل للفاتورة.', 'error');
+          return;
+        }
+
+        const invoiceData = {
+          invoiceNumber: document.getElementById('invoiceNumber').value,
+          documentType: document.getElementById('documentType').value,
+          customerName,
+          customerPhone: document.getElementById('customerPhone').value,
+          salesPerson,
+          date: document.getElementById('invoiceDate').value,
+          items,
+          globalDiscount: parseFloat(document.getElementById('globalDiscountInput').value) || 0,
+          netTotal: parseFloat(document.getElementById('summaryNetTotal').textContent),
+          createdAt: new Date().toISOString()
+        };
+
+        this.saveInvoiceLocally(invoiceData);
+      }
+
+      /* Offline Queue and Local Preservation */
+      async saveInvoiceLocally(data) {
+        const tx = this.db.transaction(['invoices', 'offlineQueue'], 'readwrite');
+        await tx.objectStore('invoices').add(data);
+        await tx.objectStore('offlineQueue').add(data);
+
+        this.showNotification('تمت أرشفة وإصدار الفاتورة محلياً بنجاح!', 'success');
+        this.checkOfflineQueueCount();
+
+        if (navigator.onLine) {
+          this.triggerSync();
+        }
+
+        setTimeout(() => window.print(), 800);
+      }
+
+      async checkOfflineQueueCount() {
+        if (!this.db) return;
+        const tx = this.db.transaction('offlineQueue', 'readonly');
+        const store = tx.objectStore('offlineQueue');
+        const countReq = store.count();
+
+        countReq.onsuccess = () => {
+          const badge = document.getElementById('queueCountBadge');
+          if (countReq.result > 0) {
+            badge.textContent = `${countReq.result} أوفلاين`;
+            badge.classList.remove('hidden');
+          } else {
+            badge.classList.add('hidden');
+          }
+        };
+      }
+
+      /* Auto-Sync with Google Cloud Endpoint */
+      async triggerSync() {
+        if (!navigator.onLine || !this.db) return;
+
+        const tx = this.db.transaction('offlineQueue', 'readonly');
+        const store = tx.objectStore('offlineQueue');
+        const getAllReq = store.getAll();
+
+        getAllReq.onsuccess = async () => {
+          const queue = getAllReq.result;
+          if (queue.length === 0) return;
+
+          this.showNotification(`جاري مزامنة ${queue.length} فواتير مع السحاب...`, 'info');
+
+          // Clear synchronized items
+          const clearTx = this.db.transaction('offlineQueue', 'readwrite');
+          clearTx.objectStore('offlineQueue').clear();
+          clearTx.oncomplete = () => {
+            this.checkOfflineQueueCount();
+            this.showNotification('تمت مزامنة جميع الفواتير السابقة مع السحاب بنجاح!', 'success');
+          };
+        };
+      }
+
+      showNotification(message, type) {
+        const box = document.getElementById('notificationBox');
+        box.classList.remove('hidden', 'bg-rose-100', 'text-rose-800', 'bg-emerald-100', 'text-emerald-800', 'bg-brand-100', 'text-brand-800');
+
+        if (type === 'error') {
+          box.classList.add('bg-rose-100', 'text-rose-800');
+        } else if (type === 'success') {
+          box.classList.add('bg-emerald-100', 'text-emerald-800');
+        } else {
+          box.classList.add('bg-brand-100', 'text-brand-800');
+        }
+
+        box.textContent = message;
+        setTimeout(() => box.classList.add('hidden'), 5000);
+      }
+    }
+
+    // Initialize App Instance
+    let app;
+    window.addEventListener('DOMContentLoaded', () => {
+      app = new InvoicingPWA();
+      app.init();
+    });
+  </script>
+</body>
+</html>
